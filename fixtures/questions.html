@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Question extraction fixture</title>
+    <style>
+      body { font: 14px/1.5 system-ui, sans-serif; padding: 24px; max-width: 900px; margin: 0 auto; }
+      table { border-collapse: collapse; width: 100%; margin-top: 24px; }
+      th, td { border: 1px solid #ccc; padding: 6px 8px; text-align: left; vertical-align: top; font-size: 13px; }
+      .pass { color: #087443; font-weight: 600; }
+      .fail { color: #b42318; font-weight: 600; }
+      #cases { opacity: 0.35; }
+      textarea { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <div id="cases"></div>
+    <div id="report"></div>
+    <script src="probe.js"></script>
+    <script>
+      // Captions live in JS, not the DOM, so page chrome never contaminates the
+      // heuristics under test.
+      const CASES = [
+        {
+          name: 'Greenhouse: label[for]',
+          html: `<div class="field"><label for="q1">Why do you want to work at Acme? <span>*</span></label><textarea id="q1"></textarea></div>`,
+          expected: 'Why do you want to work at Acme?',
+        },
+        {
+          name: 'Lever: wrapping label',
+          html: `<label class="application-label"><div class="application-question">Describe a time you disagreed with a teammate.</div><textarea name="cards[0][field0]"></textarea></label>`,
+          expected: 'Describe a time you disagreed with a teammate.',
+        },
+        {
+          name: 'Ashby: aria-labelledby',
+          html: `<div><div id="lbl-3">What interests you most about this role?</div><textarea aria-labelledby="lbl-3"></textarea></div>`,
+          expected: 'What interests you most about this role?',
+        },
+        {
+          name: 'aria-label only',
+          html: `<div><textarea aria-label="Tell us about a project you are proud of."></textarea></div>`,
+          expected: 'Tell us about a project you are proud of.',
+        },
+        {
+          name: 'Unlabelled: preceding sibling text',
+          html: `<div><p class="q">How do you approach debugging a production incident?</p><textarea></textarea></div>`,
+          expected: 'How do you approach debugging a production incident?',
+        },
+        {
+          name: 'Unlabelled: question in ancestor container',
+          html: `<section><h4>What would you build in your first 90 days?</h4><div class="wrap"><div class="inner"><textarea></textarea></div></div></section>`,
+          expected: 'What would you build in your first 90 days?',
+        },
+        {
+          name: 'NEGATIVE: bare textarea, control labels only',
+          html: `<div><textarea></textarea><button>Submit</button><button>Cancel</button></div>`,
+          expected: '',
+        },
+        {
+          name: 'NEGATIVE: generic comment placeholder',
+          html: `<div><textarea placeholder="Leave a comment"></textarea></div>`,
+          expected: '',
+        },
+        {
+          name: 'Placeholder that reads like a prompt',
+          html: `<div><textarea placeholder="Why are you a good fit for this team?"></textarea></div>`,
+          expected: 'Why are you a good fit for this team?',
+        },
+        {
+          name: 'Limits: maxlength + word cap in helper text',
+          html: `<div><label for="q9">Summarise your relevant experience.</label><textarea id="q9" maxlength="1200"></textarea><span class="help">200 words max</span></div>`,
+          expected: 'Summarise your relevant experience.',
+          limits: { maxChars: 1200, wordLimit: 200 },
+        },
+      ];
+
+      const host = document.getElementById('cases');
+      for (const c of CASES) {
+        const container = document.createElement('div');
+        container.innerHTML = c.html;
+        host.append(container);
+        c.field = container.querySelector('textarea');
+      }
+
+      const rows = CASES.map((c) => {
+        const actual = window.__af.extractQuestion(c.field);
+        const limits = window.__af.extractLimits(c.field);
+        let ok = actual === c.expected;
+        let limitNote = '';
+        if (c.limits) {
+          const limitOk =
+            limits.maxChars === c.limits.maxChars && limits.wordLimit === c.limits.wordLimit;
+          ok = ok && limitOk;
+          limitNote = ` | limits=${JSON.stringify(limits)}`;
+        }
+        return { name: c.name, expected: c.expected, actual: actual + limitNote, ok };
+      });
+
+      // React-controlled-component simulation: a listener owns the value and
+      // reverts anything written without a real input event.
+      const controlled = document.createElement('textarea');
+      host.append(controlled);
+      let reactState = '';
+      controlled.addEventListener('input', (e) => { reactState = e.target.value; });
+      setInterval(() => { if (controlled.value !== reactState) controlled.value = reactState; }, 20);
+
+      window.__af.writeAnswer(controlled, 'written via native setter');
+      setTimeout(() => {
+        const stuck = controlled.value === 'written via native setter' && reactState === 'written via native setter';
+        rows.push({
+          name: 'React-safe write into controlled component',
+          expected: 'value survives + state synced',
+          actual: `value="${controlled.value}" state="${reactState}"`,
+          ok: stuck,
+        });
+
+        const passed = rows.filter((r) => r.ok).length;
+        document.getElementById('report').innerHTML =
+          `<h3 id="summary">${passed}/${rows.length} passed</h3><table><tr><th>Case</th><th>Expected</th><th>Actual</th><th></th></tr>` +
+          rows
+            .map(
+              (r) =>
+                `<tr><td>${r.name}</td><td>${r.expected || '<em>(none)</em>'}</td><td>${r.actual || '<em>(none)</em>'}</td><td class="${r.ok ? 'pass' : 'fail'}">${r.ok ? 'PASS' : 'FAIL'}</td></tr>`,
+            )
+            .join('') +
+          `</table>`;
+      }, 120);
+    </script>
+  </body>
+</html>

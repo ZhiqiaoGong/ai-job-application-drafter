@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Prompt assembly</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; padding: 24px; max-width: 900px; margin: 0 auto; color: #334155; }
+      h1 { font-size: 20px; }
+      #score { position: sticky; top: 0; background: #fff; padding: 10px 0; font-weight: 700; font-size: 17px; }
+      .pass { color: #15803d; }
+      .fail { color: #b91c1c; }
+      li { margin-bottom: 4px; }
+      li code { color: #64748b; font-size: 13px; white-space: pre-wrap; }
+      details { margin-top: 20px; }
+      pre { background: #f8fafc; border: 1px solid #e2e8f0; padding: 14px; overflow-x: auto; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>Prompt assembly</h1>
+    <p>
+      What actually reaches the API. A model has no clock and no memory of the candidate, so
+      everything it is allowed to rely on has to be in here.
+    </p>
+    <div id="score">running...</div>
+    <ol id="results"></ol>
+
+    <details>
+      <summary>The full prompt for a revision</summary>
+      <pre id="dump"></pre>
+    </details>
+
+    <script src="prompt-probe.js"></script>
+    <script>
+      const SETTINGS = {
+        provider: 'openai',
+        apiKey: 'sk-test',
+        model: 'gpt-5',
+        tone: 'concise',
+        customInstruction: '',
+        useJobPosting: true,
+      };
+
+      // A degree that ended two months before "today". The model cannot tell that
+      // from the range alone, which is the whole reason the date is in the prompt.
+      const PROFILE = {
+        raw: 'Alex Rivera\nMS Computer Science, State University, Sep 2024 - Jun 2026\nSWE Intern, Northwind, Jun 2025 - Sep 2025',
+        updatedAt: 0,
+      };
+
+      const TODAY = new Date('2026-08-03T00:00:00Z');
+      const QUESTION = 'What is your motivation for wanting to work and reside where this position is located?';
+
+      const system = (extra) => __prompt.buildSystemPrompt({ ...SETTINGS, ...extra }, TODAY);
+      const user = (over = {}) =>
+        __prompt.buildUserPrompt({
+          context: { question: QUESTION },
+          profile: PROFILE,
+          variant: 'default',
+          ...over,
+        });
+
+      const CASES = [
+        {
+          // Without this the model reads the last entry as the current situation
+          // however long ago it ended, and every answer says "I am currently at".
+          name: "the system prompt states today's date",
+          run: () => ({ got: String(system().includes('Today is 2026-08-03')), want: 'true' }),
+        },
+        {
+          name: 'it says how to read a range against that date',
+          run: () => ({
+            got: String(system().includes('has passed is finished, not ongoing')),
+            want: 'true',
+          }),
+        },
+        {
+          name: 'the date is ISO, not a locale-dependent ordering',
+          run: () => {
+            const line = system().split('\n').find((l) => l.startsWith('Today is'));
+            return { got: line.slice(0, 20), want: 'Today is 2026-08-03.' };
+          },
+        },
+        {
+          // A resume goes stale between updates. The candidate does not.
+          name: 'the direction is ranked above the resume, explicitly',
+          run: () => ({
+            got: String(system().includes('outranks the resume')),
+            want: 'true',
+          }),
+        },
+        {
+          name: 'the anti-fabrication rule covers both sources, not just the resume',
+          run: () => {
+            const rule = system().split('\n').find((l) => l.includes('Never invent'));
+            return { got: String(rule.includes('appear in neither')), want: 'true' };
+          },
+        },
+        {
+          // Phrased as a request, a correction of fact lost to the resume every time.
+          name: 'the direction is framed as fact, not as a styling request',
+          run: () => {
+            const prompt = user({ variant: 'custom', previous: 'OLD', instruction: 'I have graduated' });
+            return {
+              got: String(
+                prompt.includes('Take it as true, including where it contradicts the resume') &&
+                  !prompt.includes('asked for this specifically'),
+              ),
+              want: 'true',
+            };
+          },
+        },
+        {
+          name: 'the direction body is the candidate text verbatim',
+          run: () => ({
+            got: user({ instruction: 'I have graduated' }).includes('\nI have graduated'),
+            want: true,
+          }),
+        },
+        {
+          name: 'a draft with no direction has no DIRECTION section',
+          run: () => ({ got: String(user().includes('### DIRECTION')), want: 'false' }),
+        },
+        {
+          name: 'the resume is always sent, whole',
+          run: () => ({ got: String(user().includes(PROFILE.raw)), want: 'true' }),
+        },
+        {
+          name: 'a revision carries the previous answer and the instruction to use it',
+          run: () => {
+            const prompt = user({ variant: 'custom', previous: 'OLD ANSWER', instruction: 'shorter please' });
+            return {
+              got: String(
+                prompt.includes('### PREVIOUS ANSWER\nOLD ANSWER') &&
+                  prompt.includes('Rewrite the previous answer to follow the direction above'),
+              ),
+              want: 'true',
+            };
+          },
+        },
+        {
+          name: 'a first draft never claims there is a previous answer',
+          run: () => ({
+            got: String(user({ instruction: 'mention Lambda' }).includes('### PREVIOUS ANSWER')),
+            want: 'false',
+          }),
+        },
+        {
+          name: 'the posting rides along only when there is one',
+          run: () => {
+            const withJob = user({
+              context: { question: QUESTION, job: { title: 'SWE 1', company: 'Garmin', description: 'Connect IQ.' } },
+            });
+            return {
+              got: String(withJob.includes('### JOB POSTING') && !user().includes('### JOB POSTING')),
+              want: 'true',
+            };
+          },
+        },
+        {
+          name: 'a length limit leaves headroom under the form maximum',
+          run: () => ({
+            got: user({ context: { question: QUESTION, maxChars: 1000 } }).includes('Stay under 900'),
+            want: true,
+          }),
+        },
+        {
+          name: 'standing instructions from settings reach the system prompt',
+          run: () => ({
+            got: String(system({ customInstruction: 'Never mention salary' }).includes('Never mention salary')),
+            want: 'true',
+          }),
+        },
+      ];
+
+      const results = document.getElementById('results');
+      let pass = 0;
+      for (const testCase of CASES) {
+        let got, want, ok;
+        try {
+          ({ got, want } = testCase.run());
+          ok = got === want;
+        } catch (error) {
+          got = 'threw: ' + error.message;
+          want = '(no throw)';
+          ok = false;
+        }
+        if (ok) pass++;
+        const li = document.createElement('li');
+        li.className = ok ? 'pass' : 'fail';
+        li.innerHTML =
+          (ok ? 'PASS' : 'FAIL') +
+          ' - ' +
+          testCase.name +
+          (ok ? '' : '<br><code>got:  ' + got + '<br>want: ' + want + '</code>');
+        results.append(li);
+      }
+      const score = document.getElementById('score');
+      score.textContent = pass + ' / ' + CASES.length + ' passing';
+      score.className = pass === CASES.length ? 'pass' : 'fail';
+
+      document.getElementById('dump').textContent =
+        system() +
+        '\n\n--- user ---\n\n' +
+        user({ variant: 'custom', previous: 'OLD ANSWER', instruction: 'I have graduated' });
+    </script>
+  </body>
+</html>

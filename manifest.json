@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "AI Job Application Drafter",
+  "version": "0.1.0",
+  "description": "Draft answers to the open-ended questions on job application forms, using your own OpenAI key.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://api.openai.com/*"],
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "AI Job Application Drafter settings"
+  }
+}

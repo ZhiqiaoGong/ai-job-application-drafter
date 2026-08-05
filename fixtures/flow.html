@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Flow regression</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; padding: 24px; max-width: 860px; margin: 0 auto; color: #334155; }
+      h1 { font-size: 20px; }
+      #score { position: sticky; top: 0; background: #fff; padding: 10px 0; font-weight: 700; font-size: 17px; }
+      .pass { color: #15803d; }
+      .fail { color: #b91c1c; }
+      li { margin-bottom: 4px; }
+      li code { color: #64748b; font-size: 13px; }
+      #stage { position: absolute; left: -9999px; top: 0; width: 600px; }
+      #stage label { display: block; font-weight: 700; }
+      #stage textarea { width: 100%; height: 70px; }
+    </style>
+  </head>
+  <body>
+    <!--
+      First in the body on purpose: the question heuristics walk up to preceding
+      siblings, and anything above the stage would be scraped as question text.
+    -->
+    <div id="stage"></div>
+
+    <h1>Content script flow</h1>
+    <p>
+      Focus, generation, sticky direction, and Undo, driven through the real content script
+      against a stubbed background.
+    </p>
+    <div id="score">running...</div>
+    <ol id="results"></ol>
+
+    <script src="flow-probe.js"></script>
+    <script>
+      const stage = document.getElementById('stage');
+      const results = document.getElementById('results');
+
+      // Every case builds its own fields: per-field state is keyed by element,
+      // so reusing one across cases would leak the previous case's direction.
+      function makeField(question, initial = '') {
+        const label = document.createElement('label');
+        const area = document.createElement('textarea');
+        const id = 'f' + Math.random().toString(36).slice(2);
+        label.htmlFor = id;
+        label.textContent = question;
+        area.id = id;
+        area.value = initial;
+        stage.append(label, area);
+        return area;
+      }
+
+      // The extension-context bug surfaced as an *uncaught* error, so watch for
+      // escapes directly rather than trusting that a case would notice.
+      const escaped = [];
+      addEventListener('error', (event) => escaped.push(event.message));
+      addEventListener('unhandledrejection', (event) => escaped.push(String(event.reason)));
+
+      const settle = async () => {
+        for (let i = 0; i < 3; i++) await new Promise((r) => setTimeout(r, 0));
+      };
+
+      // The stage has to stay short. Fields from earlier cases would push later
+      // ones below the fold, where the panel hides itself as offscreen and every
+      // assertion about what it is showing reads as absent rather than wrong.
+      function resetStage() {
+        stage.replaceChildren();
+        focused = null;
+      }
+
+      // What switching browser tabs looks like: focus is lost with nothing on this
+      // page taking it, and no pointerdown anywhere in the document.
+      function blurToNothing() {
+        if (focused) focused.dispatchEvent(new FocusEvent('focusout', { bubbles: true }));
+      }
+
+      function pointerDownOn(node) {
+        node.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, composed: true }));
+      }
+
+      // Coming back to a field the panel was dismissed from. The tracker still
+      // says it is focused, so focus() alone would do nothing.
+      function refocus(field) {
+        focused = null;
+        focus(field);
+      }
+
+      // Synthetic rather than real .focus(): a page without window focus has its
+      // focus events deferred, which made every case silently do nothing.
+      let focused = null;
+      function focus(field) {
+        if (focused === field) return;
+        if (focused) {
+          focused.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: field }));
+        }
+        focused = field;
+        field.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+      }
+
+      async function draft(field) {
+        focus(field);
+        __flow.click('Draft answer');
+        await settle();
+      }
+
+      // Generate again, whichever row the panel happens to be showing.
+      async function again(field) {
+        focus(field);
+        __flow.click(__flow.panel().buttons.includes('Redo') ? 'Redo' : 'Draft answer');
+        await settle();
+      }
+
+      async function direct(field, text) {
+        focus(field);
+        __flow.click(__flow.panel().chip ? 'Refine' : 'Add direction');
+        __flow.typeDirection(text);
+        __flow.click('Send');
+        await settle();
+      }
+
+      const JOB = {
+        url: 'https://boards.greenhouse.io/acme/jobs/4012345',
+        source: 'json-ld',
+        capturedAt: Date.now(),
+        title: 'Senior Backend Engineer',
+        company: 'Acme',
+        description: 'You will build distributed systems.',
+      };
+
+      const PASTED = 'We need a Rust engineer for the payments team.';
+
+      // The posting is resolved per page, so a case that reseeds the store has to
+      // look like a new page. A hash change is enough and keeps the origin.
+      let pageCount = 0;
+      function newPage() {
+        history.replaceState(null, '', '#c' + ++pageCount);
+      }
+
+      /** A posting that was captured on the page the form is on. */
+      function jobHere() {
+        return { ...JOB, url: location.href, capturedAt: Date.now() };
+      }
+
+      // Open the pill's popover, which needs the field focused first. Clicking the
+      // pill toggles, so an already-open popover must be left alone.
+      async function popover(field) {
+        focus(field);
+        await settle();
+        if (!__flow.popover().open) __flow.clickPill();
+        return __flow.popover();
+      }
+
+      async function paste(field, text) {
+        const p = await popover(field);
+        __flow.click(p.actions.find((a) => a.startsWith('Paste')) ?? 'Edit the pasted text');
+        __flow.typePaste(text);
+        __flow.click('Use this');
+        await settle();
+      }
+
+      const CASES = [
+        {
+          name: 'fresh field offers a draft and no direction',
+          async run() {
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            const p = __flow.panel();
+            return { got: p.buttons.join(',') + ' | chip=' + p.chip, want: 'Draft answer,Add direction... | chip=null' };
+          },
+        },
+        {
+          name: 'direction survives leaving and returning to the field',
+          async run() {
+            const a = makeField('Why do you want to work here?');
+            const b = makeField('Describe a hard technical problem you solved.');
+            await direct(a, 'mention Lambda');
+            focus(b);
+            focus(a);
+            return { got: String(__flow.panel().chip), want: 'mention Lambda' };
+          },
+        },
+        {
+          name: 'the draft row comes back too, not the idle row',
+          async run() {
+            const a = makeField('Why do you want to work here?');
+            const b = makeField('Describe a hard technical problem you solved.');
+            await draft(a);
+            focus(b);
+            focus(a);
+            return { got: __flow.panel().buttons.join(','), want: 'Redo,Shorter,Refine...,Undo' };
+          },
+        },
+        {
+          name: 'undo after returning restores the candidate text, not ours',
+          async run() {
+            const a = makeField('Why do you want to work here?', 'MY OWN DRAFT');
+            const b = makeField('Describe a hard technical problem you solved.');
+            await draft(a);
+            focus(b);
+            focus(a);
+            __flow.click('Undo');
+            return { got: __flow.readFieldValue(a), want: 'MY OWN DRAFT' };
+          },
+        },
+        {
+          // Reading the pre-insert value on focus rather than on insert made a
+          // second draft treat our own first draft as the candidate's text, so
+          // Undo handed back an answer they never wrote.
+          name: 'undo after a second draft still restores the candidate text',
+          async run() {
+            const a = makeField('Why do you want to work here?', 'MY OWN DRAFT');
+            const b = makeField('Describe a hard technical problem you solved.');
+            await draft(a);
+            focus(b);
+            focus(a);
+            __flow.setReply('ANSWER-2');
+            await again(a);
+            __flow.setReply('ANSWER-1');
+            __flow.click('Undo');
+            return { got: __flow.readFieldValue(a), want: 'MY OWN DRAFT' };
+          },
+        },
+        {
+          name: 'undo keeps the direction',
+          async run() {
+            const a = makeField('Why do you want to work here?', 'MY OWN DRAFT');
+            await direct(a, 'mention Lambda');
+            __flow.click('Undo');
+            return { got: String(__flow.panel().chip), want: 'mention Lambda' };
+          },
+        },
+        {
+          name: 'revising after returning still carries the previous answer and direction',
+          async run() {
+            const a = makeField('Why do you want to work here?');
+            const b = makeField('Describe a hard technical problem you solved.');
+            await direct(a, 'mention Lambda');
+            focus(b);
+            focus(a);
+            __flow.click('Shorter');
+            await settle();
+            const r = __flow.lastGenerate();
+            return {
+              got: [r.variant, r.previous, r.instruction].join(' | '),
+              want: 'shorter | ANSWER-1 | mention Lambda',
+            };
+          },
+        },
+        {
+          name: 'two fields keep separate directions',
+          async run() {
+            const a = makeField('Why do you want to work here?');
+            const b = makeField('Describe a hard technical problem you solved.');
+            await direct(a, 'direction for A');
+            await direct(b, 'direction for B');
+            focus(a);
+            const first = __flow.panel().chip;
+            focus(b);
+            return { got: first + ' / ' + __flow.panel().chip, want: 'direction for A / direction for B' };
+          },
+        },
+        {
+          name: 'editing an existing direction puts the caret at the end',
+          async run() {
+            const a = makeField('Why do you want to work here?');
+            await direct(a, 'mention Lambda');
+            __flow.click('Refine');
+            const c = __flow.refineCaret();
+            return { got: c.value + ' @' + c.start + '-' + c.end, want: 'mention Lambda @14-14' };
+          },
+        },
+        {
+          name: 'clearing the direction drops it from the next request',
+          async run() {
+            const a = makeField('Why do you want to work here?');
+            await direct(a, 'mention Lambda');
+            __flow.click('×');
+            __flow.click('Redo');
+            await settle();
+            const r = __flow.lastGenerate();
+            return { got: String(r.instruction) + ' | chip=' + __flow.panel().chip, want: 'undefined | chip=null' };
+          },
+        },
+        {
+          name: 'the posting rides along in the generate request',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await draft(a);
+            const job = __flow.lastGenerate().context.job;
+            return { got: job.company + ' | ' + job.title, want: 'Acme | Senior Backend Engineer' };
+          },
+        },
+        {
+          name: 'the panel names the posting it is using',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            await settle();
+            return { got: String(__flow.jobLabel()), want: 'Acme - Senior Backend Engineer' };
+          },
+        },
+        {
+          name: 'the pill collapses to the company once a draft exists',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await draft(a);
+            return { got: String(__flow.jobLabel()), want: 'Acme' };
+          },
+        },
+        {
+          // Pasting is only reachable through the pill, so nothing detected is
+          // exactly when the pill must still be there.
+          name: 'nothing detected still leaves a pill to click',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await draft(a);
+            const p = await popover(a);
+            return {
+              got: [
+                __flow.jobLabel(),
+                String(__flow.lastGenerate().context.job),
+                p.kind,
+                p.actions.join(','),
+              ].join(' | '),
+              want: 'No posting | undefined | No posting | Paste a posting',
+            };
+          },
+        },
+        {
+          name: 'a posting found on the page is reported as certain',
+          async run() {
+            newPage();
+            __flow.setJob(jobHere());
+            const a = makeField('Why do you want to work here?');
+            const p = await popover(a);
+            return {
+              got: [p.title, p.note, String(p.guess), p.url].join(' | '),
+              want:
+                'Acme - Senior Backend Engineer | Found on this page. | false | ' + location.href,
+            };
+          },
+        },
+        {
+          // The cross-host reach is the only tier that guesses, so it is the only
+          // one that gets flagged as one.
+          name: 'a posting carried from another host is reported as a guess',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            const p = await popover(a);
+            return {
+              got: [p.note, String(p.guess)].join(' | '),
+              want: 'From boards.greenhouse.io, 1 minute ago. | true',
+            };
+          },
+        },
+        {
+          name: 'pasting a posting replaces what was detected',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await paste(a, PASTED);
+            await draft(a);
+            return {
+              got: __flow.jobLabel() + ' | ' + __flow.lastGenerate().context.job.description,
+              want: 'Pasted posting | ' + PASTED,
+            };
+          },
+        },
+        {
+          name: 'the popover says how much text was pasted, and offers to edit it',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await paste(a, PASTED);
+            const p = __flow.popover();
+            return {
+              got: [p.title, p.note, String(p.url), p.actions[0]].join(' | '),
+              want:
+                'Pasted posting - 46 characters | You pasted this. Used for every question on this page. | null | Edit the pasted text',
+            };
+          },
+        },
+        {
+          // Otherwise a five-question form means pasting the same text five times.
+          name: 'the next question on the page uses the pasted posting already',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            const b = makeField('Describe a hard technical problem you solved.');
+            await paste(a, PASTED);
+            await draft(b);
+            return {
+              got: __flow.jobLabel() + ' | ' + __flow.lastGenerate().context.job.description,
+              want: 'Pasted posting | ' + PASTED,
+            };
+          },
+        },
+        {
+          // Page loads keep offering what they scraped, and the retry fires again
+          // 2.5s in. None of it may take over. The second newPage forces a fresh
+          // resolution, so this goes through the store instead of the panel cache.
+          name: 'a posting detected later does not take over from the pasted text',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await paste(a, PASTED);
+            await __flow.remember(jobHere());
+            newPage();
+            const b = makeField('Describe a hard technical problem you solved.');
+            await draft(b);
+            return {
+              got: __flow.jobLabel() + ' | ' + __flow.lastGenerate().context.job.description,
+              want: 'Pasted posting | ' + PASTED,
+            };
+          },
+        },
+        {
+          // Deduplicating on URL alone deleted the detected posting the moment
+          // anything was pasted over it, leaving nothing to switch back to.
+          name: 'a paste and what was detected on the same page both survive',
+          async run() {
+            newPage();
+            __flow.setJob(jobHere());
+            const a = makeField('Why do you want to work here?');
+            await paste(a, PASTED);
+            const stored = __flow.storedJobs();
+            return {
+              got: stored.length + ': ' + stored.map((j) => j.source).join(','),
+              want: '2: manual,json-ld',
+            };
+          },
+        },
+        {
+          // Pasting used to be permanent for the session: it won every tier and
+          // the popover had no way back to what the page actually offered.
+          name: 'pasting is not a one-way door',
+          async run() {
+            newPage();
+            __flow.setJob(jobHere());
+            const a = makeField('Why do you want to work here?');
+            await paste(a, PASTED);
+            const offered = __flow.popover().actions.join(',');
+            __flow.click('Use Acme');
+            await settle();
+            await draft(a);
+            return {
+              got: [offered, __flow.jobLabel(), __flow.lastGenerate().context.job.description].join(
+                ' / ',
+              ),
+              want:
+                'Edit the pasted text,Use Acme - Senior Backend Engineer instead,Answer without a posting' +
+                ' / Acme / You will build distributed systems.',
+            };
+          },
+        },
+        {
+          name: 'nothing to switch back to means nothing is offered',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await paste(a, PASTED);
+            return {
+              got: __flow.popover().actions.join(','),
+              want: 'Edit the pasted text,Answer without a posting',
+            };
+          },
+        },
+        {
+          // Sending costs a request and overwrites the field, and the panel sits on
+          // a page that is otherwise all form fields, where Enter is muscle memory.
+          name: 'plain enter does not send a direction, cmd-enter does',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            await settle();
+            __flow.click('Add direction');
+            __flow.typeDirection('mention Lambda');
+            const count = () => __flow.sent.filter((r) => r.type === 'generate').length;
+            const before = count();
+            __flow.keyDownIn('input', 'Enter');
+            await settle();
+            const afterPlain = count() - before;
+            // If plain Enter sent, the refine row is already gone and pressing
+            // again would throw instead of reporting the count that matters.
+            const stillOpen = __flow.panel().buttons.includes('Send');
+            if (stillOpen) {
+              __flow.keyDownIn('input', 'Enter', { meta: true });
+              await settle();
+            }
+            return {
+              got: `${afterPlain}/${count() - before} open=${stillOpen}`,
+              want: '0/1 open=true',
+            };
+          },
+        },
+        {
+          name: 'turning the posting off drops it from the request',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.click('Answer without a posting');
+            await settle();
+            await draft(a);
+            return {
+              got: __flow.jobLabel() + ' | ' + String(__flow.lastGenerate().context.job),
+              want: 'Posting off | undefined',
+            };
+          },
+        },
+        {
+          name: 'the off popover offers the detected posting back',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.click('Answer without a posting');
+            await settle();
+            const off = __flow.popover();
+            __flow.click('Use it');
+            await settle();
+            return {
+              got: [off.kind, off.note, off.actions.join(','), __flow.jobLabel()].join(' | '),
+              want:
+                'Not using a posting | Acme - Senior Backend Engineer was found for this site. | Use it,Paste a posting | Acme - Senior Backend Engineer',
+            };
+          },
+        },
+        {
+          // Pasting is a statement that a posting should be used, so it must not
+          // land behind an opt-out made earlier.
+          name: 'pasting while off turns the posting back on',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.click('Answer without a posting');
+            await settle();
+            await paste(a, PASTED);
+            await draft(a);
+            return {
+              got: __flow.jobLabel() + ' | ' + String(__flow.lastGenerate().context.job?.description),
+              want: 'Pasted posting | ' + PASTED,
+            };
+          },
+        },
+        {
+          // Offering to paste into something the setting would then ignore is a trap.
+          name: 'the settings switch removes the pill entirely',
+          async run() {
+            __flow.setJob(JOB);
+            __flow.setDisabled(true);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await draft(a);
+            const got = String(__flow.jobLabel()) + ' | ' + String(__flow.lastGenerate().context.job);
+            __flow.setDisabled(false);
+            return { got, want: 'null | undefined' };
+          },
+        },
+        {
+          // What the meta fallback produces on a job-shaped URL with no og tags:
+          // document.title and nothing else. Best possible provenance, no content.
+          name: 'a title with no description is reported as adding nothing',
+          async run() {
+            newPage();
+            __flow.setJob({
+              url: location.href,
+              source: 'meta',
+              capturedAt: Date.now(),
+              title: 'Internal form 4471',
+            });
+            const a = makeField('Why do you want to work here?');
+            const p = await popover(a);
+            return {
+              got: [p.note, String(p.gap)].join(' | '),
+              want:
+                'Found on this page. | No description was found, so this posting adds almost nothing.',
+            };
+          },
+        },
+        {
+          name: 'a thin posting greys the pill, a full one does not',
+          async run() {
+            newPage();
+            __flow.setJob({
+              url: location.href,
+              source: 'meta',
+              capturedAt: Date.now(),
+              title: 'Internal form 4471',
+            });
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            await settle();
+            const thin = __flow.jobLabel() + '=' + __flow.jobIsWeak();
+            newPage();
+            __flow.setJob(jobHere());
+            const b = makeField('Describe a hard technical problem you solved.');
+            focus(b);
+            await settle();
+            return {
+              got: thin + ' / ' + __flow.jobLabel() + '=' + __flow.jobIsWeak(),
+              want: 'Internal form 4471=true / Acme - Senior Backend Engineer=false',
+            };
+          },
+        },
+        {
+          name: 'a full posting says nothing about gaps',
+          async run() {
+            newPage();
+            __flow.setJob(jobHere());
+            const a = makeField('Why do you want to work here?');
+            const p = await popover(a);
+            return { got: String(p.gap), want: 'null' };
+          },
+        },
+        {
+          name: 'clicking the page closes the popover',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            const before = (await popover(a)).open;
+            __flow.pointerDownOutside();
+            return { got: before + ' -> ' + __flow.popover().open, want: 'true -> false' };
+          },
+        },
+        {
+          name: 'clicking inside the popover leaves it open',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.pointerDownIn('.pop .act');
+            return { got: String(__flow.popover().open), want: 'true' };
+          },
+        },
+        {
+          // Reaching for Draft answer is moving on, so the popover should not
+          // stay hanging over the row.
+          name: 'clicking a panel button closes the popover',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.pointerDownIn('.panel button:not(.job)');
+            return { got: String(__flow.popover().open), want: 'false' };
+          },
+        },
+        {
+          name: 'escape closes the popover',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.keyDownIn(null, 'Escape');
+            return { got: String(__flow.popover().open), want: 'false' };
+          },
+        },
+        {
+          // Otherwise one stray Escape throws away the text that was just pasted.
+          name: 'escape in the paste box cancels the paste, not the popover',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.click('Paste a posting');
+            __flow.keyDownIn('.pop textarea', 'Escape');
+            const p = __flow.popover();
+            return { got: p.open + ' / ' + p.pasting, want: 'true / false' };
+          },
+        },
+        {
+          // The panel would otherwise name a posting that the answer never saw.
+          name: 'drafting before the posting resolves still sends it',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            __flow.click('Draft answer');
+            await settle();
+            return {
+              got: String(__flow.lastGenerate().context.job?.title),
+              want: 'Senior Backend Engineer',
+            };
+          },
+        },
+        {
+          // Reloading or updating the extension orphans the content script in every
+          // open tab. sendMessage then throws synchronously, which is why this got
+          // out as an uncaught error instead of being handled by a .catch.
+          name: 'a reloaded extension is reported, not thrown',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            const before = escaped.length;
+            __flow.setOrphaned(true);
+            focus(a);
+            await settle();
+            const onFocus = __flow.panel().error;
+            __flow.click('Draft answer');
+            await settle();
+            const onClick = __flow.panel().error;
+            __flow.setOrphaned(false);
+            return {
+              got: `${onFocus} | onClick=${onClick === onFocus} | escaped=${escaped.length - before}`,
+              want:
+                'The extension was reloaded. Reload this page to use it again. | onClick=true | escaped=0',
+            };
+          },
+        },
+        {
+          // The panel sits under the field and covers whatever is below it, so
+          // getting rid of it has to work without hunting for another input.
+          name: 'clicking blank page space dismisses the panel',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            await settle();
+            const before = __flow.panel().hidden;
+            __flow.pointerDownOutside();
+            return { got: before + ' -> ' + __flow.panel().hidden, want: 'false -> true' };
+          },
+        },
+        {
+          name: 'clicking the field it belongs to keeps the panel',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            await settle();
+            pointerDownOn(a);
+            return { got: String(__flow.panel().hidden), want: 'false' };
+          },
+        },
+        {
+          // Switching tabs or clicking browser chrome fires the same null
+          // relatedTarget as a click on the page. Coming back has to find the
+          // draft still there, so only the pointerdown may dismiss.
+          name: 'losing focus without a click on the page keeps the panel',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            await settle();
+            blurToNothing();
+            return { got: String(__flow.panel().hidden), want: 'false' };
+          },
+        },
+        {
+          name: 'escape dismisses the panel, but closes the popover first',
+          async run() {
+            __flow.setJob(JOB);
+            newPage();
+            const a = makeField('Why do you want to work here?');
+            await popover(a);
+            __flow.keyDownIn(null, 'Escape');
+            const afterFirst = `${__flow.popover().open}/${__flow.panel().hidden}`;
+            __flow.keyDownIn(null, 'Escape');
+            return {
+              got: afterFirst + ' -> ' + __flow.panel().hidden,
+              want: 'false/false -> true',
+            };
+          },
+        },
+        {
+          name: 'dismissing keeps the draft and the direction for the field',
+          async run() {
+            __flow.setJob(null);
+            newPage();
+            const a = makeField('Why do you want to work here?', 'MY OWN DRAFT');
+            await direct(a, 'mention Lambda');
+            __flow.pointerDownOutside();
+            refocus(a);
+            await settle();
+            const p = __flow.panel();
+            return {
+              // The leading × is the direction chip's own clear button.
+              got: p.chip + ' | ' + p.buttons.join(','),
+              want: 'mention Lambda | ×,Redo,Shorter,Refine...,Undo',
+            };
+          },
+        },
+        {
+          name: 'a field with no question gets no panel',
+          async run() {
+            const lone = document.createElement('textarea');
+            stage.append(lone);
+            const a = makeField('Why do you want to work here?');
+            focus(a);
+            focus(lone);
+            return { got: String(__flow.panel().hidden), want: 'true' };
+          },
+        },
+      ];
+
+      (async () => {
+        let pass = 0;
+        for (const testCase of CASES) {
+          let got, want, ok;
+          try {
+            resetStage();
+            ({ got, want } = await testCase.run());
+            ok = got === want;
+          } catch (error) {
+            got = 'threw: ' + error.message;
+            want = '(no throw)';
+            ok = false;
+          }
+          if (ok) pass++;
+          const li = document.createElement('li');
+          li.className = ok ? 'pass' : 'fail';
+          li.innerHTML =
+            (ok ? 'PASS' : 'FAIL') +
+            ' - ' +
+            testCase.name +
+            (ok ? '' : '<br><code>got:  ' + got + '<br>want: ' + want + '</code>');
+          results.append(li);
+        }
+        const score = document.getElementById('score');
+        score.textContent = pass + ' / ' + CASES.length + ' passing';
+        score.className = pass === CASES.length ? 'pass' : 'fail';
+      })();
+    </script>
+  </body>
+</html>

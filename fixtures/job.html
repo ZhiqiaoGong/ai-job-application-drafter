@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Job capture fixture</title>
+    <style>
+      body { font: 15px/1.6 system-ui, sans-serif; padding: 24px; max-width: 900px; margin: 0 auto; color: #334155; }
+      h1 { font-size: 20px; }
+      #score { position: sticky; top: 0; background: #fff; padding: 10px 0; font-weight: 700; font-size: 17px; }
+      .pass { color: #15803d; }
+      .fail { color: #b91c1c; }
+      li { margin-bottom: 4px; }
+      li code { display: block; white-space: pre-wrap; color: #64748b; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <h1>Job posting capture</h1>
+    <p>Reading a posting off a page, and matching a remembered one to the page being filled in.</p>
+    <div id="score">running...</div>
+    <ol id="results"></ol>
+
+    <script src="job-probe.js"></script>
+    <script>
+      const ATS = 'https://boards.greenhouse.io/acme/jobs/4012345';
+      const CORP = 'https://www.acme.com/about/team';
+
+      function ld(payload) {
+        return '<script type="application/ld+json">' + JSON.stringify(payload) + '<\/script>';
+      }
+
+      const POSTING = {
+        '@context': 'https://schema.org',
+        '@type': 'JobPosting',
+        title: 'Senior Backend Engineer',
+        hiringOrganization: { '@type': 'Organization', name: 'Acme' },
+        description: '<p>You will build <strong>distributed systems</strong>.</p><ul><li>Go</li></ul>',
+      };
+
+      const now = 1_700_000_000_000;
+      const minutes = (n) => n * 60 * 1000;
+      const capture = (url, capturedAt, extra = {}) => ({
+        url,
+        source: 'json-ld',
+        capturedAt,
+        title: 'T',
+        ...extra,
+      });
+
+      const CASES = [
+        {
+          name: 'JSON-LD JobPosting, HTML description flattened to text',
+          run: () => {
+            const job = __job.extract(ld(POSTING), ATS);
+            return {
+              got: [job.source, job.company, job.title, job.description].join(' | '),
+              want: 'json-ld | Acme | Senior Backend Engineer | You will build distributed systems.Go',
+            };
+          },
+        },
+        {
+          name: 'JSON-LD wrapped in @graph',
+          run: () => {
+            const html = ld({ '@context': 'https://schema.org', '@graph': [{ '@type': 'WebPage' }, POSTING] });
+            return { got: __job.extract(html, ATS).title, want: 'Senior Backend Engineer' };
+          },
+        },
+        {
+          name: 'JSON-LD as a top-level array',
+          run: () => {
+            const html = ld([{ '@type': 'BreadcrumbList' }, POSTING]);
+            return { got: __job.extract(html, ATS).title, want: 'Senior Backend Engineer' };
+          },
+        },
+        {
+          name: '@type given as an array',
+          run: () => {
+            const html = ld({ ...POSTING, '@type': ['JobPosting'] });
+            return { got: __job.extract(html, ATS).title, want: 'Senior Backend Engineer' };
+          },
+        },
+        {
+          name: 'hiringOrganization given as a bare string',
+          run: () => {
+            const html = ld({ ...POSTING, hiringOrganization: 'Acme Corp' });
+            return { got: __job.extract(html, ATS).company, want: 'Acme Corp' };
+          },
+        },
+        {
+          name: 'broken JSON-LD in one tag does not hide a valid one',
+          run: () => {
+            const html = '<script type="application/ld+json">{ nope, </' + 'script>' + ld(POSTING);
+            return { got: __job.extract(html, ATS).title, want: 'Senior Backend Engineer' };
+          },
+        },
+        {
+          name: 'no structured data on an ATS host falls back to meta tags',
+          run: () => {
+            const html = `
+              <meta property="og:title" content="Senior Backend Engineer at Acme" />
+              <meta property="og:site_name" content="Acme" />
+              <meta property="og:description" content="Build distributed systems with us." />`;
+            const job = __job.extract(html, ATS);
+            return {
+              got: [job.source, job.company, job.title].join(' | '),
+              want: 'meta | Acme | Senior Backend Engineer at Acme',
+            };
+          },
+        },
+        {
+          name: 'NEGATIVE: meta tags on a page that is not a posting',
+          run: () => {
+            const html = `
+              <meta property="og:title" content="Meet the team" />
+              <meta property="og:description" content="We are a friendly bunch." />`;
+            return { got: String(__job.extract(html, CORP)), want: 'null' };
+          },
+        },
+        {
+          name: 'a job-shaped path on an ordinary host is enough for meta',
+          run: () => {
+            const html = '<meta property="og:title" content="Backend Engineer" />';
+            const job = __job.extract(html, 'https://www.acme.com/careers/backend-engineer');
+            return { got: job.source + ' | ' + job.title, want: 'meta | Backend Engineer' };
+          },
+        },
+        {
+          name: 'NEGATIVE: JobPosting with nothing usable in it',
+          run: () => {
+            const html = ld({ '@type': 'JobPosting', datePosted: '2026-01-01' });
+            return { got: String(__job.extract(html, ATS)), want: 'null' };
+          },
+        },
+        {
+          name: 'an overlong description is clipped',
+          run: () => {
+            const html = ld({ ...POSTING, description: 'x'.repeat(9000) });
+            const description = __job.extract(html, ATS).description;
+            return {
+              got: description.length + ' ends ' + description.slice(-3),
+              want: '6003 ends ...',
+            };
+          },
+        },
+        {
+          name: 'matching: the posting captured on this exact page wins',
+          run: () => {
+            const jobs = [capture(CORP, now), capture(ATS, now - minutes(20))];
+            return { got: pick(jobs, ATS), want: ATS + ' / page' };
+          },
+        },
+        {
+          name: 'matching: same host beats a more recent one elsewhere',
+          run: () => {
+            const other = 'https://boards.greenhouse.io/acme/jobs/999';
+            const jobs = [capture(CORP, now), capture(other, now - minutes(5))];
+            return { got: pick(jobs, ATS), want: other + ' / origin' };
+          },
+        },
+        {
+          name: 'matching: a recent posting carries across to another host',
+          run: () => {
+            const jobs = [capture(CORP, now - minutes(3))];
+            return { got: pick(jobs, ATS), want: CORP + ' / recent' };
+          },
+        },
+        {
+          name: 'matching: a stale posting is not carried across',
+          run: () => {
+            const jobs = [capture(CORP, now - minutes(45))];
+            return { got: String(__job.pickJob(jobs, ATS, now)), want: 'null' };
+          },
+        },
+        {
+          // Explicit beats inferred, on every tier, for the whole site.
+          name: 'matching: pasted text wins over a posting found on the page itself',
+          run: () => {
+            const pasted = __job.manualCapture(ATS + '/application', 'PASTED', now);
+            const jobs = [capture(ATS, now), pasted];
+            return { got: pick(jobs, ATS), want: ATS + '/application / manual' };
+          },
+        },
+        {
+          // Deduplicating on URL alone deleted the detected posting as soon as
+          // anything was pasted over it, so there was nothing to switch back to.
+          name: 'remembering: a paste and a capture at the same URL coexist',
+          run: () => {
+            const pasted = __job.manualCapture(ATS, 'PASTED', now);
+            const jobs = __job.rememberInto([pasted], capture(ATS, now + 1));
+            return {
+              got: jobs.length + ': ' + jobs.map((j) => j.source).join(','),
+              want: '2: manual,json-ld',
+            };
+          },
+        },
+        {
+          // Losing typed text to a bit more browsing would be the worst trade in
+          // here, so the cap counts the two kinds separately.
+          name: 'remembering: browsing more postings cannot evict pasted text',
+          run: () => {
+            let jobs = [__job.manualCapture(ATS + '/application', 'PASTED', now)];
+            for (let i = 1; i <= 6; i++) jobs = __job.rememberInto(jobs, capture('https://x.test/' + i, now + i));
+            return {
+              got: jobs.length + ': ' + jobs.filter((j) => j.source === 'manual').length + ' manual',
+              want: '6: 1 manual',
+            };
+          },
+        },
+        {
+          name: 'matching: what a paste is standing in front of is still findable',
+          run: () => {
+            const jobs = [__job.manualCapture(ATS, 'PASTED', now), capture(ATS, now)];
+            const picked = __job.pickJob(jobs, ATS, now);
+            const under = __job.pickDetected(jobs, ATS, now);
+            return {
+              got: picked.match + ' -> ' + under.match + ' ' + under.job.url,
+              want: 'manual -> page ' + ATS,
+            };
+          },
+        },
+        {
+          // Pasted text belongs to the site it was typed on and must never be
+          // reached by the cross-host fallback.
+          name: 'matching: pasted text does not travel to another host',
+          run: () => {
+            const jobs = [__job.manualCapture(CORP, 'PASTED', now)];
+            return { got: String(__job.pickJob(jobs, ATS, now)), want: 'null' };
+          },
+        },
+        {
+          name: 'resolving: dropping the paste falls back to what was detected',
+          run: () => {
+            const jobs = [__job.manualCapture(ATS, 'PASTED', now), capture(ATS, now)];
+            const before = __job.resolveJob(jobs, [], ATS, now);
+            const after = __job.resolveJob(__job.dropManual(jobs, ATS), [], ATS, now);
+            return {
+              got: [before.match, before.detected.url, after.match, after.job.url].join(' | '),
+              want: ['manual', ATS, 'page', ATS].join(' | '),
+            };
+          },
+        },
+        {
+          name: 'remembering: newest first, one per URL, capped at five',
+          run: () => {
+            let jobs = [];
+            for (let i = 1; i <= 6; i++) jobs = __job.rememberInto(jobs, capture('https://x.test/' + i, now + i));
+            jobs = __job.rememberInto(jobs, capture('https://x.test/4', now + 99));
+            return {
+              got: jobs.length + ': ' + jobs.map((j) => j.url.split('/').pop()).join(','),
+              want: '5: 4,6,5,3,2',
+            };
+          },
+        },
+        {
+          name: 'resolving: turning it off for a site still reports what it would use',
+          run: () => {
+            const jobs = [capture(ATS, now)];
+            const off = __job.resolveJob(jobs, __job.silence([], ATS), ATS, now);
+            return { got: off.kind + ' / ' + off.available.url, want: 'off / ' + ATS };
+          },
+        },
+        {
+          name: 'resolving: an unrelated site is unaffected by the opt-out',
+          run: () => {
+            const jobs = [capture(CORP, now)];
+            const state = __job.resolveJob(jobs, __job.silence([], ATS), CORP, now);
+            return { got: state.kind + ' / ' + state.match, want: 'using / page' };
+          },
+        },
+        {
+          name: 'resolving: nothing stored and nothing silenced is simply none',
+          run: () => {
+            return { got: __job.resolveJob([], [], ATS, now).kind, want: 'none' };
+          },
+        },
+        {
+          name: 'labelling: company and title, falling back to the host',
+          run: () => {
+            const named = __job.describeJob({ url: ATS, company: 'Acme', title: 'Backend Engineer' });
+            const bare = __job.describeJob({ url: ATS });
+            return { got: named + ' / ' + bare, want: 'Acme - Backend Engineer / https://boards.greenhouse.io' };
+          },
+        },
+        {
+          // Pasted text has no title, and naming it by host would make it look
+          // like something we found rather than something the candidate supplied.
+          name: 'labelling: pasted text is not labelled by its host',
+          run: () => {
+            return { got: __job.describeJob(__job.manualCapture(ATS, 'PASTED', now)), want: 'Pasted posting' };
+          },
+        },
+        {
+          // The one line that has to explain the whole memory to the candidate.
+          name: 'wording: only the cross-host reach is worded as a guess',
+          run: () => {
+            const job = capture(CORP, now - minutes(12));
+            return {
+              got: [
+                __job.describeMatch(job, 'page', now),
+                __job.describeMatch(job, 'origin', now),
+                __job.describeMatch(job, 'recent', now),
+              ].join(' | '),
+              want:
+                'Found on this page. | Found on www.acme.com. | From www.acme.com, 12 minutes ago.',
+            };
+          },
+        },
+        {
+          // extractJob's guard needs only one of the three fields, so a bare page
+          // title on a job-shaped URL gets through. It has to be marked, not kept
+          // out: on a real ATS page document.title is often the role itself.
+          name: 'substance: a scraped page title survives extraction but is thin',
+          run: () => {
+            const job = __job.extract('<title>Internal form 4471</title>', ATS);
+            return {
+              got: [job.source, job.title, String(job.description), __job.isThin(job)].join(' | '),
+              want: 'meta | Internal form 4471 | undefined | true',
+            };
+          },
+        },
+        {
+          name: 'substance: a real posting is not thin and reports no gap',
+          run: () => {
+            const job = __job.extract(ld(POSTING), ATS);
+            return {
+              got: __job.isThin(job) + ' | ' + String(__job.describeGaps(job)),
+              want: 'false | null',
+            };
+          },
+        },
+        {
+          name: 'substance: pasted text is never thin',
+          run: () => {
+            const job = __job.manualCapture(ATS, 'PASTED', now);
+            return {
+              got: __job.isThin(job) + ' | ' + String(__job.describeGaps(job)),
+              want: 'false | null',
+            };
+          },
+        },
+      ];
+
+      function pick(jobs, url) {
+        const picked = __job.pickJob(jobs, url, now);
+        return picked && picked.job.url + ' / ' + picked.match;
+      }
+
+      const results = document.getElementById('results');
+      let pass = 0;
+      for (const testCase of CASES) {
+        let got, want, ok;
+        try {
+          ({ got, want } = testCase.run());
+          ok = got === want;
+        } catch (error) {
+          got = 'threw: ' + error.message;
+          want = '(no throw)';
+          ok = false;
+        }
+        if (ok) pass++;
+        const li = document.createElement('li');
+        li.className = ok ? 'pass' : 'fail';
+        li.textContent = (ok ? 'PASS' : 'FAIL') + ' - ' + testCase.name;
+        if (!ok) {
+          const code = document.createElement('code');
+          code.textContent = 'got:  ' + got + '\nwant: ' + want;
+          li.append(code);
+        }
+        results.append(li);
+      }
+      const score = document.getElementById('score');
+      score.textContent = pass + ' / ' + CASES.length + ' passing';
+      score.className = pass === CASES.length ? 'pass' : 'fail';
+    </script>
+  </body>
+</html>

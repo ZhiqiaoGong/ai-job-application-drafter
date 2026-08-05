@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Panel preview</title>
+    <style>
+      body { font: 16px/1.6 system-ui, sans-serif; padding: 28px; max-width: 760px; margin: 0 auto; color: #334155; }
+      label { display: block; font-weight: 700; color: #475569; margin-bottom: 10px; }
+      .req { color: #dc2626; }
+      textarea { width: 100%; box-sizing: border-box; padding: 14px; font: inherit; border: 2px solid #2563eb; border-radius: 6px; }
+      .controls { margin-top: 200px; }
+      button { margin-right: 8px; padding: 6px 12px; }
+    </style>
+  </head>
+  <body>
+    <label for="q">
+      Please tell us about your experience / familiarity with two or more of the following:
+      Python, Django, AWS, SQL, REST APIs, React, HTML5, CSS3, and ES6+.<span class="req">*</span>
+    </label>
+    <textarea id="q" rows="6">I have extensive experience with Python, having used it during my internship at Northwind to build an async evaluation pipeline, which improved throughput significantly. I also have a solid background in SQL, designing a PostgreSQL results store for unique-key deduplication that achieved a 96% reduction in query latency.</textarea>
+
+    <div class="controls">
+      <button onclick="mount()">no posting</button>
+      <button onclick="mount({ job: USING })">idle + posting</button>
+      <button onclick="mount({ job: USING }); __ui.showResultActions()">result (collapsed pill)</button>
+      <button onclick="mount({ job: USING, hasAnswer: true, direction: 'mention Lambda and keep it under 3 sentences' })">
+        result + direction
+      </button>
+      <button onclick="mount({ job: USING }); __ui.showResultActions(); press('Refine')">refine</button>
+      <button onclick="mount({ job: USING }); __ui.setBusy(true, 'Writing...')">busy</button>
+      <button onclick="mount({ job: USING }); __ui.setError('API key rejected (401). Check that the key is correct and still active.')">error</button>
+    </div>
+    <div class="controls" style="margin-top: 12px">
+      <button onclick="mount({ job: USING }); pill()">popover: guess</button>
+      <button onclick="mount({ job: ONPAGE }); pill()">popover: found here</button>
+      <button onclick="mount({ job: PASTED }); pill()">popover: pasted</button>
+      <button onclick="mount(); pill()">popover: nothing found</button>
+      <button onclick="mount({ job: OFF }); pill()">popover: turned off</button>
+      <button onclick="mount(); pill(); press('Paste a posting')">popover: pasting</button>
+    </div>
+
+    <script src="panel-probe.js"></script>
+    <script>
+      const field = document.getElementById('q');
+
+      const JOB = {
+        url: 'https://careers.acme.com/openings/be-sr',
+        source: 'json-ld',
+        capturedAt: Date.now() - 12 * 60 * 1000,
+        title: 'Senior Backend Engineer',
+        company: 'Acme',
+        description: 'You will build distributed systems.',
+      };
+
+      const USING = { kind: 'using', job: JOB, match: 'recent' };
+      const ONPAGE = { kind: 'using', job: JOB, match: 'page' };
+      const PASTED = {
+        kind: 'using',
+        match: 'manual',
+        detected: JOB,
+        job: {
+          url: 'https://boards.greenhouse.io/acme/jobs/4012345/application',
+          source: 'manual',
+          capturedAt: Date.now(),
+          description: 'x'.repeat(3180),
+        },
+      };
+      const OFF = { kind: 'off', available: JOB };
+
+      function mount(restore) {
+        __ui.showFor(
+          field,
+          {
+            generate: () => {},
+            undo: () => {},
+            clearDirection: () => __ui.setDirection(null),
+            paste: (text) =>
+              __ui.setJob({
+                kind: 'using',
+                match: 'manual',
+                detected: JOB,
+                job: { url: location.href, source: 'manual', capturedAt: Date.now(), description: text },
+              }),
+            useDetected: () => __ui.setJob(USING),
+            toggleJob: (on) => __ui.setJob(on ? USING : OFF),
+            dismiss: () => __ui.hide(),
+          },
+          restore,
+        );
+      }
+
+      function shadow() {
+        return document.querySelector('[data-ai-drafter]').shadowRoot;
+      }
+      function press(label) {
+        [...shadow().querySelectorAll('button')].find((b) => b.textContent.startsWith(label)).click();
+      }
+      function pill() {
+        shadow().querySelector('.job').click();
+      }
+
+      mount({ job: USING });
+    </script>
+  </body>
+</html>

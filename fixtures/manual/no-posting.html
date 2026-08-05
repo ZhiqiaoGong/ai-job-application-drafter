@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      Deliberately bare. No application/ld+json, no og: tags, and the file name
+      keeps the path from matching JOB_PATH in src/content/job.ts, which is what
+      makes the meta-tag fallback decline instead of banking document.title.
+
+      Not part of the automated suites. This one is for driving the real extension
+      by hand: it is the only way to see the empty state and the paste flow.
+    -->
+    <title>Internal form 4471</title>
+    <style>
+      body {
+        font: 16px/1.65 system-ui, -apple-system, sans-serif;
+        max-width: 760px;
+        margin: 0 auto;
+        padding: 32px 24px 64px;
+        color: #1f2933;
+      }
+      header { border-bottom: 1px solid #e3e8ef; padding-bottom: 16px; margin-bottom: 28px; }
+      h1 { font-size: 22px; margin: 0 0 4px; }
+      .org { color: #6b7280; font-size: 14px; }
+      h2 { font-size: 15px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; margin: 32px 0 10px; }
+      #jd { background: #f7f9fc; border: 1px solid #e3e8ef; border-radius: 8px; padding: 18px 20px; }
+      #jd p { margin: 0 0 12px; }
+      #jd ul { margin: 0; padding-left: 20px; }
+      button.copy { margin-top: 12px; padding: 7px 13px; font: inherit; font-size: 14px; cursor: pointer; border: 1px solid #c3ccd8; border-radius: 6px; background: #fff; }
+      label { display: block; font-weight: 600; margin: 26px 0 8px; }
+      .limit { font-weight: 400; color: #6b7280; font-size: 14px; }
+      textarea { width: 100%; box-sizing: border-box; padding: 12px; font: inherit; border: 1px solid #c3ccd8; border-radius: 6px; }
+      footer { margin-top: 56px; border-top: 1px solid #e3e8ef; padding-top: 20px; font-size: 14px; color: #6b7280; }
+      footer ol { padding-left: 22px; }
+      footer li { margin-bottom: 6px; }
+      code { background: #f0f3f8; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Internal form 4471</h1>
+      <p class="org">Submitted to the hiring committee</p>
+    </header>
+
+    <h2>Role description</h2>
+    <div id="jd">
+      <p>
+        Northwind Logistics is hiring a Senior Platform Engineer to own the routing service that
+        schedules roughly 40,000 deliveries a day. You will work with two other platform engineers
+        and report to the Director of Engineering.
+      </p>
+      <p>What you will do:</p>
+      <ul>
+        <li>Take the routing service from nightly batch runs to continuous replanning</li>
+        <li>Cut p99 latency on the dispatch API, which sits near 1.8 seconds today</li>
+        <li>Own the Postgres schema behind it, including a painful multi-tenant migration</li>
+        <li>Be on call one week in four, and shrink the pager load while you are at it</li>
+      </ul>
+      <p>
+        We care much more about depth in distributed systems and databases than about the specific
+        languages on your resume. The service is Python and Go; the migration tooling is Rust.
+      </p>
+      <button class="copy" type="button" onclick="copyJd()">Copy this description</button>
+    </div>
+
+    <h2>Questions</h2>
+
+    <label for="q1">
+      Why do you want to work on logistics infrastructure specifically?
+      <span class="limit">(250 words max)</span>
+    </label>
+    <textarea id="q1" rows="7"></textarea>
+
+    <label for="q2">
+      Describe a system you took from batch processing to something closer to real time. What broke
+      first?
+    </label>
+    <textarea id="q2" rows="7"></textarea>
+
+    <label for="q3">Anything else you would like the committee to know?</label>
+    <textarea id="q3" rows="5"></textarea>
+
+    <h2>Not a question</h2>
+    <p style="font-size: 14px; color: #6b7280">
+      The field below has no label of any kind. The panel should stay away from it.
+    </p>
+    <textarea id="unlabelled" rows="3" aria-hidden="false"></textarea>
+
+    <footer>
+      <p><strong>What to check</strong></p>
+      <ol>
+        <li>
+          Click into the first question. The pill should read <code>No posting</code> in grey, not a
+          company name. If it names a company, a posting from an earlier tab is still in session
+          storage: reload the extension from <code>chrome://extensions</code> and try again.
+        </li>
+        <li>
+          Click the pill. It should say the answer will use your resume only, and offer
+          <code>Paste a posting</code> as the single action.
+        </li>
+        <li>Copy the description above, paste it in, and use it. The pill becomes
+          <code>Pasted posting</code> with a character count in the popover.</li>
+        <li>
+          Draft an answer here, then click into the <em>second</em> question. It should already say
+          <code>Pasted posting</code> without pasting again.
+        </li>
+        <li>
+          Turn it off from the popover, and confirm the pill reads <code>Posting off</code> on all
+          three questions, then that <code>Use it</code> is not offered, since nothing was detected.
+        </li>
+        <li>The unlabelled field at the bottom should get no panel at all.</li>
+      </ol>
+    </footer>
+
+    <script>
+      function copyJd() {
+        const jd = document.getElementById('jd').cloneNode(true);
+        jd.querySelector('button').remove();
+        navigator.clipboard.writeText(jd.innerText.trim()).then(
+          () => (document.querySelector('.copy').textContent = 'Copied'),
+          () => (document.querySelector('.copy').textContent = 'Select it and copy manually'),
+        );
+      }
+    </script>
+  </body>
+</html>
