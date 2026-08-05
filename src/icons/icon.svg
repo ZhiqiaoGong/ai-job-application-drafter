@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!--
+    Source for the PNGs in this directory; regenerate with `npm run icons`.
+    Kept to four shapes on purpose: at 16px in the Chrome toolbar, anything
+    finer than a 10px bar at this scale turns into grey mush.
+  -->
+  <rect width="128" height="128" rx="28" fill="#2563eb" />
+  <g fill="#ffffff">
+    <rect x="26" y="34" width="76" height="11" rx="5.5" />
+    <rect x="26" y="58" width="76" height="11" rx="5.5" />
+    <rect x="26" y="82" width="40" height="11" rx="5.5" />
+    <path d="M88 72 q4.5 14 16.5 15.5 -12 1.5 -16.5 15.5 -4.5 -14 -16.5 -15.5 12 -1.5 16.5 -15.5 z" />
+  </g>
+</svg>

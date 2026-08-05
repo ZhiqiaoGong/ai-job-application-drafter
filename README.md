@@ -4,6 +4,12 @@ AI drafts your answers to the open-ended questions on job application forms. Chr
 
 Click into a question like *"Why do you want to work here?"* and a small panel appears under the field. One click writes a draft straight into the box. No copy-paste step.
 
+![The panel under a job application question, showing the matched posting and a Draft answer button](docs/panel-idle.png)
+
+Once there is a draft, the row turns into revisions. The direction you typed stays attached to the question, so Redo and Shorter keep honouring it, and Undo gives back whatever you had written before the tool first touched the field.
+
+![The same question with a drafted answer, showing a direction chip and the Redo, Shorter, Refine and Undo buttons](docs/panel-result.png)
+
 ## What it does not do
 
 **No form autofill.** Name, email, phone, work authorisation — Simplify and friends already do that well, and this deliberately stays out of their way. It only touches the free-text boxes those tools leave empty.
@@ -34,6 +40,10 @@ Matching runs in tiers, most trustworthy first:
 | `recent` | Captured anywhere in the last 30 minutes |
 
 Only the last one is a guess, so **the panel always names the posting it picked and says where it came from**. A wrong match is visible rather than silent. If it is wrong, or if nothing was found, or if what was found is a bare page title with no description, the panel says so and you can paste the real description in — once per site, not once per question.
+
+![The posting popover, naming the matched job, linking to it, and flagging that it was carried over from another host 12 minutes ago](docs/panel-posting.png)
+
+The amber line is the tell: a posting found on the page you are filling in says *"Found on this page."* in grey, and only the cross-host reach gets flagged.
 
 **Revisions keep your steering.** Type a direction like *"mention the Postgres migration and keep it under 3 sentences"* and it sticks to that question: Redo and Shorter keep honouring it until you clear it.
 
@@ -78,7 +88,11 @@ npm run build      # bundle to dist/
 npm run watch      # rebuild on change
 npm run typecheck  # tsc --noEmit
 npm run fixture    # build the fixtures below
+npm run icons      # re-render the icon PNGs (needs rsvg-convert)
+npm run shots      # re-render the README images (needs Chrome, macOS path)
 ```
+
+`icons` and `shots` are only needed when the icon or the panel changes; their output is committed, so a normal build needs neither.
 
 There is no test runner. Instead `npm run fixture` builds self-scoring HTML pages you open in a browser — they exercise the real modules and print a pass/fail list.
 
@@ -89,6 +103,7 @@ There is no test runner. Instead `npm run fixture` builds self-scoring HTML page
 | `dist/flow.html` | The content script end to end, against a stubbed background |
 | `dist/prompt.html` | What actually reaches the API, plus a dump of the full prompt |
 | `dist/panel.html` | Every panel state, for eyeballing |
+| `dist/shot.html` | The panel over a realistic question; the source of the images above |
 
 `flow.html` drives the real content script and calls the real background functions, faking only `chrome.storage`, so the rules under test are the shipped ones. `fixtures/manual/no-posting.html` is a hand-driven page for the case where no posting can be detected.
 
@@ -106,7 +121,9 @@ Each fixture case exists because something was actually wrong. A few of them:
 src/background/   service worker; the only context that reads the API key
 src/content/      field detection, question extraction, the panel, insertion
 src/lib/          prompt assembly, posting matching, storage, provider adapter
+src/icons/        icon sources and the generated PNGs
 fixtures/         self-scoring dev pages
+docs/             the images in this README
 ```
 
 Adding another LLM provider means one branch in `src/lib/llm.ts` and nothing else.

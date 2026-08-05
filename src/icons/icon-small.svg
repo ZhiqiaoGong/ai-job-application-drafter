@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!--
+    Source for the 16px and 32px PNGs. The full icon has three text bars and a
+    curved sparkle; downsampled to 16px those merge into grey mush and the
+    sparkle reads as a fourth broken bar. This variant drops to two bars and a
+    straight-edged star, which survives the resample.
+  -->
+  <rect width="128" height="128" rx="26" fill="#2563eb" />
+  <g fill="#ffffff">
+    <rect x="24" y="30" width="80" height="15" rx="7.5" />
+    <rect x="24" y="57" width="40" height="15" rx="7.5" />
+    <path d="M92 62 L98.7 81.3 L118 88 L98.7 94.7 L92 114 L85.3 94.7 L66 88 L85.3 81.3 Z" />
+  </g>
+</svg>

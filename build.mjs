@@ -39,9 +39,16 @@ const statics = [
   ['src/options/options.html', `${outdir}/options.html`],
 ];
 
+// PNGs are committed rather than generated at build time: rsvg-convert is not a
+// dependency, and nobody should need it installed to build the extension.
+const icons = [16, 32, 48, 128].map((size) => [
+  `src/icons/icon-${size}.png`,
+  `${outdir}/icons/icon-${size}.png`,
+]);
+
 await rm(outdir, { recursive: true, force: true });
-await mkdir(outdir, { recursive: true });
-await Promise.all(statics.map(([from, to]) => cp(from, to)));
+await mkdir(`${outdir}/icons`, { recursive: true });
+await Promise.all([...statics, ...icons].map(([from, to]) => cp(from, to)));
 
 if (watch) {
   const contexts = await Promise.all(entries.map((entry) => context({ ...shared, ...entry })));

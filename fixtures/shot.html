@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>README screenshot</title>
+    <!--
+      Renders the real panel over a realistic question so the README images are
+      the shipped component, not a mockup of it. Driven by the URL hash and shot
+      with headless Chrome; see `npm run shots`.
+    -->
+    <style>
+      html, body { margin: 0; background: #ffffff; }
+      body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; color: #1f2933; }
+      /* Bottom padding leaves room for the panel, which hangs below the field. */
+      .page { padding: 28px 32px 72px; }
+      .card { border: 1px solid #e3e8ef; border-radius: 10px; padding: 24px 26px; }
+      label { display: block; font-weight: 600; margin-bottom: 12px; }
+      .req { color: #dc2626; }
+      textarea {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 14px;
+        font: inherit;
+        line-height: 1.6;
+        border: 1px solid #c3ccd8;
+        border-radius: 6px;
+        resize: none;
+      }
+      textarea:focus { outline: 2px solid #2563eb; outline-offset: -1px; }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <div class="card">
+        <label for="q">
+          Why do you want to work at Northwind, and what draws you to this team in particular?<span class="req">*</span>
+        </label>
+        <textarea id="q" rows="4"></textarea>
+      </div>
+    </div>
+
+    <script src="panel-probe.js"></script>
+    <script>
+      const field = document.getElementById('q');
+
+      const JOB = {
+        url: 'https://boards.greenhouse.io/northwind/jobs/4012345',
+        source: 'json-ld',
+        capturedAt: Date.now() - 12 * 60 * 1000,
+        title: 'Senior Platform Engineer',
+        company: 'Northwind',
+        description: 'You will own the routing service.',
+      };
+
+      const ANSWER =
+        'Northwind runs the routing service at a scale where scheduling and latency stop being separate problems, and that is the part I want to work on. At Lakeside I took a nightly batch pipeline to continuous replanning and cut p99 on the dispatch path from 1.8s to 240ms, mostly by fixing the Postgres access patterns rather than adding cache layers.';
+
+      const handlers = {
+        generate: () => {},
+        undo: () => {},
+        clearDirection: () => {},
+        paste: () => {},
+        useDetected: () => {},
+        toggleJob: () => {},
+        dismiss: () => {},
+      };
+
+      const shots = {
+        idle() {
+          __ui.showFor(field, handlers, { job: { kind: 'using', job: JOB, match: 'recent' } });
+        },
+        result() {
+          field.value = ANSWER;
+          __ui.showFor(field, handlers, {
+            job: { kind: 'using', job: JOB, match: 'recent' },
+            hasAnswer: true,
+            direction: 'lead with the routing work',
+          });
+        },
+        posting() {
+          __ui.showFor(field, handlers, { job: { kind: 'using', job: JOB, match: 'recent' } });
+          document.querySelector('[data-ai-drafter]').shadowRoot.querySelector('.job').click();
+        },
+      };
+
+      (shots[location.hash.slice(1)] ?? shots.idle)();
+    </script>
+  </body>
+</html>

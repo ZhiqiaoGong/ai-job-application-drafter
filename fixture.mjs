@@ -13,6 +13,7 @@ const FIXTURES = [
   { probe: 'fixtures/flow-probe.ts', page: 'fixtures/flow.html', script: 'flow-probe.js', out: 'dist/flow.html' },
   { probe: 'fixtures/prompt-probe.ts', page: 'fixtures/prompt.html', script: 'prompt-probe.js', out: 'dist/prompt.html' },
   { probe: 'fixtures/panel-probe.ts', page: 'fixtures/panel.html', script: 'panel-probe.js', out: 'dist/panel.html' },
+  { probe: 'fixtures/panel-probe.ts', page: 'fixtures/shot.html', script: 'panel-probe.js', out: 'dist/shot.html' },
 ];
 
 await mkdir('dist', { recursive: true });
