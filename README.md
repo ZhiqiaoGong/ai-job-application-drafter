@@ -12,6 +12,12 @@ Click into a question like *"Why do you want to work here?"* and a small panel a
 
 The whole tool is one job: the handful of questions per application that actually need writing.
 
+## Why it exists
+
+Simplify and tools like it already autofill the routine fields, and do it well. The AI writing is the part behind a subscription, and it was the only part I wanted. With your own API key the same work costs a few cents per application instead of a monthly fee.
+
+It was built for my own job hunt first. It is public because the problem is common, not because it is a product — there is no store listing, no support, and the defaults are the ones that suited me. If it suits you too, it is MIT.
+
 ## How it works
 
 **It waits for you.** No DOM scanning, no MutationObserver. The panel appears when you focus a field that has a recognisable question near it, and stays quiet everywhere else. A textarea with no question attached gets nothing.
@@ -49,7 +55,11 @@ Click the toolbar icon to open settings, then fill in three things:
 
 1. **API key** — yours, from [platform.openai.com](https://platform.openai.com/api-keys). Billed to your account.
 2. **Model** — free text, so a newer model works without a new build.
-3. **Resume** — plain text. This is the single source of truth for every answer, so keep it current; a stale graduation date produces answers that say you are still in school.
+3. **Resume** — pasted in as plain text. There is no file upload, on purpose: whatever you uploaded would be flattened to text before it reached the model anyway, and this way you see exactly what it sees.
+
+   If you paste out of a PDF, read it back before saving. Two-column layouts often interleave into nonsense on copy, and every answer would quietly inherit that. Structure matters more than formatting — headings and bullets are fine, alignment is not.
+
+   This is the single source of truth for every answer, so keep it current. A stale graduation date produces answers that say you are still in school.
 
 ## Privacy
 
