@@ -1,4 +1,4 @@
-import type { AnswerField } from './detect';
+import { hasValue, type AnswerField } from './detect';
 
 const MIN_LENGTH = 12;
 const MAX_LENGTH = 400;
@@ -11,29 +11,39 @@ const COARSE_CONTAINERS = new Set(['BODY', 'HTML', 'MAIN', 'FORM', 'ARTICLE']);
 const CONTROL_SELECTOR =
   'textarea, select, [contenteditable="true"], input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"])';
 
+/** These point at this field explicitly, so their text is the question. */
+const STRONG = [fromLabelFor, fromAriaLabelledBy, fromWrappingLabel];
+
+/**
+ * These are guesses about what is near the field, so the text has to read like a
+ * prompt as well. Without that bar, any chat composer whose placeholder happens
+ * to be friendly ("How can I help you today?") is an application question, and
+ * any three words sitting above a comment box are too.
+ */
+const WEAK = [fromAriaLabel, fromNearbyText, fromPlaceholder];
+
 /**
  * Find the question a field belongs to, trying the most reliable signals first.
  * Returns an empty string when nothing plausible is found, which is the signal
  * to leave the field alone entirely.
  */
 export function extractQuestion(field: AnswerField): string {
-  const strategies = [
-    fromLabelFor,
-    fromAriaLabelledBy,
-    fromAriaLabel,
-    fromWrappingLabel,
-    fromNearbyText,
-  ];
+  // A single-line input starts from a much worse place than a textarea: most of
+  // the web's inputs are search and filter boxes. Only an explicit label that
+  // reads like a question is enough to offer to write into one.
+  const strict = field instanceof HTMLInputElement;
 
-  for (const strategy of strategies) {
+  for (const strategy of STRONG) {
     const text = clean(strategy(field));
-    if (isPlausibleQuestion(text)) return text;
+    if (isPlausibleQuestion(text) && (!strict || looksLikePrompt(text))) return text;
   }
 
-  // Placeholders are the weakest signal and the easiest way to get a false
-  // positive on an ordinary comment box, so they must also read like a prompt.
-  const placeholder = clean(fromPlaceholder(field));
-  if (isPlausibleQuestion(placeholder) && looksLikePrompt(placeholder)) return placeholder;
+  if (strict) return '';
+
+  for (const strategy of WEAK) {
+    const text = clean(strategy(field));
+    if (isPlausibleQuestion(text) && looksLikePrompt(text)) return text;
+  }
 
   return '';
 }
@@ -47,7 +57,7 @@ export interface FieldLimits {
 export function extractLimits(field: AnswerField): FieldLimits {
   const limits: FieldLimits = {};
 
-  if (field instanceof HTMLTextAreaElement && field.maxLength > 0) {
+  if (hasValue(field) && field.maxLength > 0) {
     limits.maxChars = field.maxLength;
   }
 
@@ -174,10 +184,16 @@ function isPlausibleQuestion(text: string): boolean {
   return text.split(/\s+/).length >= 3;
 }
 
+/**
+ * A question mark, or an opening that asks for something. Kept to a curated list
+ * rather than anything cleverer: the failure this guards against is a chat box,
+ * and chat boxes are labelled with nouns ("Message", "Reply") or with verbs that
+ * are not requests for information ("Send", "Search", "Write your prompt").
+ */
 function looksLikePrompt(text: string): boolean {
   return (
     text.includes('?') ||
-    /^(why|what|how|when|where|which|who|describe|tell|explain|share|list|summari[sz]e|walk|give)\b/i.test(
+    /^(please\s+)?(why|what|whats|how|when|where|which|who|describe|tell|explain|share|list|summari[sz]e|walk|give|provide|discuss|outline|elaborate|detail|briefly|in\s+\d+|do|does|did|are|is|have|has|would|could|can|should|if)\b/i.test(
       text,
     )
   );

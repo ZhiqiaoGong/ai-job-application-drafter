@@ -1,4 +1,4 @@
-import type { AnswerField } from './detect';
+import { hasValue, type AnswerField } from './detect';
 
 /**
  * Write text into a field so that React, Vue, and friends actually notice.
@@ -9,8 +9,12 @@ import type { AnswerField } from './detect';
  * `input` event is what makes a controlled component accept the text.
  */
 export function writeAnswer(field: AnswerField, text: string): void {
-  if (field instanceof HTMLTextAreaElement) {
-    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
+  if (hasValue(field)) {
+    // The setter has to come from the matching prototype: React tracks them
+    // separately, and an input written through the textarea setter is ignored.
+    const prototype =
+      field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
     if (setter) {
       setter.call(field, text);
     } else {

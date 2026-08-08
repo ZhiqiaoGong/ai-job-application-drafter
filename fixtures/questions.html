@@ -72,6 +72,68 @@
           expected: 'Summarise your relevant experience.',
           limits: { maxChars: 1200, wordLimit: 200 },
         },
+        {
+          // A label pointing at the field is strong enough on its own. Only the
+          // guessed signals have to read like a question.
+          name: 'Strong label that is not question-shaped still counts',
+          html: `<div><label for="q10">Anything else you would like the team to know</label><textarea id="q10"></textarea></div>`,
+          expected: 'Anything else you would like the team to know',
+        },
+
+        // --- surfaces that are not application forms -------------------------
+        {
+          name: 'NEGATIVE: Overleaf-style CodeMirror editor',
+          html: `<div><p>How do you want to structure this document?</p><div class="cm-editor"><div class="cm-content" contenteditable="true">\\section{Intro}</div></div></div>`,
+          select: '.cm-content',
+          expected: '',
+        },
+        {
+          // The placeholder is a real question, which is exactly why the text
+          // heuristics cannot be the thing that rejects a chat composer.
+          name: 'NEGATIVE: chat composer with a friendly placeholder',
+          html: `<div class="ProseMirror" contenteditable="true" aria-label="How can I help you today?"></div>`,
+          select: '.ProseMirror',
+          expected: '',
+        },
+        {
+          name: 'NEGATIVE: plain textarea composer',
+          html: `<div><textarea placeholder="Send a message"></textarea></div>`,
+          expected: '',
+        },
+
+        // --- single-line inputs ----------------------------------------------
+        {
+          name: 'Input: short question with a label',
+          html: `<div><label for="i1">If yes, please include name(s) and the nature of the relationship(s)</label><input type="text" id="i1" /></div>`,
+          select: 'input',
+          expected: 'If yes, please include name(s) and the nature of the relationship(s)',
+        },
+        {
+          name: 'NEGATIVE: input whose label is not a question',
+          html: `<div><label for="i2">Portfolio or personal website</label><input type="text" id="i2" /></div>`,
+          select: 'input',
+          expected: '',
+        },
+        {
+          // Question-shaped, but the browser already knows what belongs here, so
+          // it is an identity field the autofill tools own.
+          name: 'NEGATIVE: input with an autocomplete hint',
+          html: `<div><label for="i3">What is your full legal name?</label><input type="text" id="i3" autocomplete="name" /></div>`,
+          select: 'input',
+          expected: '',
+        },
+        {
+          name: 'NEGATIVE: non-text input type',
+          html: `<div><label for="i4">What is your preferred contact email?</label><input type="email" id="i4" /></div>`,
+          select: 'input',
+          expected: '',
+        },
+        {
+          name: 'NEGATIVE: input with only nearby question text',
+          html: `<div><p>Why do you want to work at Acme?</p><input type="text" /></div>`,
+          select: 'input',
+          expected: '',
+        },
       ];
 
       const host = document.getElementById('cases');
@@ -79,11 +141,15 @@
         const container = document.createElement('div');
         container.innerHTML = c.html;
         host.append(container);
-        c.field = container.querySelector('textarea');
+        c.field = container.querySelector(c.select ?? 'textarea');
       }
 
       const rows = CASES.map((c) => {
-        const actual = window.__af.extractQuestion(c.field);
+        // Mirror the content script: the field has to be answerable at all before
+        // its surroundings are read, which is where editors and inputs are judged.
+        const actual = window.__af.isAnswerField(c.field)
+          ? window.__af.extractQuestion(c.field)
+          : '';
         const limits = window.__af.extractLimits(c.field);
         let ok = actual === c.expected;
         let limitNote = '';
