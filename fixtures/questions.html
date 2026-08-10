@@ -134,6 +134,34 @@
           select: 'input',
           expected: '',
         },
+
+        // --- dropdowns dressed as text boxes ---------------------------------
+        {
+          // The label is a real question and the inner input is a real input, so
+          // only the ARIA says this is a picker.
+          name: 'NEGATIVE: react-select style combobox',
+          html: `<div><label for="s1">How did you hear about us?</label><div role="combobox" aria-expanded="false"><input type="text" id="s1" /></div></div>`,
+          select: 'input',
+          expected: '',
+        },
+        {
+          name: 'NEGATIVE: combobox role on the input itself',
+          html: `<div><label for="s2">Which office would you prefer to work from?</label><input type="text" id="s2" role="combobox" aria-autocomplete="list" /></div>`,
+          select: 'input',
+          expected: '',
+        },
+        {
+          name: 'NEGATIVE: input backed by a datalist',
+          html: `<div><label for="s3">What is your preferred programming language?</label><input type="text" id="s3" list="langs" /><datalist id="langs"><option value="Go"></option></datalist></div>`,
+          select: 'input',
+          expected: '',
+        },
+        {
+          name: 'NEGATIVE: native select',
+          html: `<div><label for="s4">How many years of experience do you have?</label><select id="s4"><option>1-3</option></select></div>`,
+          select: 'select',
+          expected: '',
+        },
       ];
 
       const host = document.getElementById('cases');

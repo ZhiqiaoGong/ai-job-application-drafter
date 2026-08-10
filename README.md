@@ -35,7 +35,13 @@ What it never sends: the page, its DOM, the form, the other questions on it, or 
 
 **It waits for you.** It never scans the page for fields and runs no MutationObserver. The panel appears when you focus a field with a recognisable question near it, and stays quiet everywhere else.
 
-Textareas, rich text boxes, and short `<input>` questions all count. Two things keep it off the rest of the web: code and chat editors (CodeMirror, Monaco, ProseMirror, Lexical, Quill) are skipped outright, and a question guessed from nearby text or a placeholder has to actually read like one. A label pointing straight at the field is trusted as-is. Single-line inputs are held to the strictest bar — an explicit, question-shaped label and no `autocomplete` hint — because otherwise every search box on the web qualifies.
+Textareas, rich text boxes, and short `<input>` questions all count. Three things keep it off the rest of the web:
+
+- Code and chat editors (CodeMirror, Monaco, ProseMirror, Lexical, Quill) are skipped outright. A composer whose placeholder is *"How can I help you today?"* passes any test you can write about the text, so the text is not what rejects it.
+- Comboboxes are skipped. Component libraries build dropdowns out of a real `<input>` for filtering, and on a form that input sits under a perfectly good question label — only its ARIA gives it away. A choice question is not an open-ended one.
+- A question guessed from nearby text or a placeholder has to read like a question. A label pointing straight at the field is trusted as-is.
+
+Single-line inputs are held to the strictest bar on top of that: an explicit, question-shaped label and no `autocomplete` hint. Anything the browser can autofill is an identity field the autofill tools own.
 
 **It finds the job posting.** Reads Schema.org `JobPosting` JSON-LD, falling back to `og:` tags only where the URL is plausibly a posting at all. Postings are kept for the browser session, so a description read on a company careers page is still there when the form turns out to live on Greenhouse.
 

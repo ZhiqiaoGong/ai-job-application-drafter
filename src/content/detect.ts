@@ -21,10 +21,27 @@ const EDITOR_ROOTS = [
   '.ql-editor', // Quill
 ].join(',');
 
+/**
+ * A dropdown wearing a text box. Component libraries build their selects out of a
+ * real `<input>` used to filter the options, and on a form that input sits under
+ * a perfectly good question label - "How did you hear about us?" - so nothing in
+ * the text tells it apart. The ARIA it carries does.
+ *
+ * A choice question is not an open-ended one. Prose typed into the filter box
+ * would match no option and submit nothing.
+ */
+function isCombobox(node: HTMLElement): boolean {
+  // A datalist is the same idea without the library.
+  if (node.hasAttribute('list')) return true;
+  if (node.hasAttribute('aria-autocomplete') || node.hasAttribute('aria-expanded')) return true;
+  return node.closest('[role="combobox"], [role="listbox"], [aria-haspopup]') !== null;
+}
+
 export function isAnswerField(node: EventTarget | null): node is AnswerField {
   if (!(node instanceof HTMLElement)) return false;
   if (isOwnUi(node)) return false;
   if (node.closest(EDITOR_ROOTS)) return false;
+  if (isCombobox(node)) return false;
 
   if (node instanceof HTMLTextAreaElement) {
     return !node.readOnly && !node.disabled;
