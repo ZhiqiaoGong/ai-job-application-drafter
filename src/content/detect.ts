@@ -34,7 +34,20 @@ function isCombobox(node: HTMLElement): boolean {
   // A datalist is the same idea without the library.
   if (node.hasAttribute('list')) return true;
   if (node.hasAttribute('aria-autocomplete') || node.hasAttribute('aria-expanded')) return true;
-  return node.closest('[role="combobox"], [role="listbox"], [aria-haspopup]') !== null;
+
+  const popup = node.getAttribute('aria-haspopup');
+  if (popup && popup !== 'false') return true;
+
+  // The wrapper pattern: react-select and friends put the role on a container
+  // around the filter input. Bounded, because `closest` runs to <html>, and one
+  // page-level role would otherwise silence every field beneath it.
+  let ancestor: HTMLElement | null = node.parentElement;
+  for (let depth = 0; depth < 3 && ancestor; depth += 1) {
+    const role = ancestor.getAttribute('role');
+    if (role === 'combobox' || role === 'listbox') return true;
+    ancestor = ancestor.parentElement;
+  }
+  return false;
 }
 
 export function isAnswerField(node: EventTarget | null): node is AnswerField {
